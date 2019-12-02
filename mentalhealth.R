@@ -1,4 +1,4 @@
-#setwd("~/Documents/Bioinformatics/Classes/FALL/API222/Assignments/Group/Dataset")
+setwd("~/Documents/Bioinformatics/Classes/FALL/API222/Assignments/Group/Dataset")
 
 
 # Library -----------------------------------------------------------------
@@ -17,7 +17,7 @@ pack <- c("data.table","tidyverse",
           "gam", "splines",
           "purrr", "caret", "caretEnsemble", "skimr", "DataExplorer", "knn", "kknn", "MASS", 
           "RANN", "gbm", "glmnet", "fastDummies", "forcats", "MLmetrics", "mice", "ROSE", "lsr",
-          "randomForest", "e1071")
+          "randomForest", "e1071", "caret")
 
 
 install_or_load_pack (pack)
@@ -42,6 +42,7 @@ mental <- mental%>%dplyr::select(-c("date", "state"))
 
 # Imputation using Mean Matching
 
+library(mice)
 mental2 <- mice(mental)
 mental <- complete(mental2, 1)
 
@@ -51,19 +52,22 @@ mental<- mental%>%mutate_at("gender", function(x){as.factor(x)})
 
 # Adding regions to countries
 
-install.packages("countrycode")
+#install.packages("countrycode")
 library(countrycode)
 mental$region <- countrycode(mental$country, origin="country.name", destination="region")
 mental<- mental%>%mutate_at("region", function(x){as.factor(x)})
 
+mental <- mental%>%mutate(
+  age = case_when(
+    age < 17 ~ 40,
+    age > 100 ~ 40,
+    TRUE ~ age
+  )
+)
 
 # Cleaned dataset
 
-#write.csv(mental, file="mental_clean.csv")
-
-
-
-
+write.csv(mental, file="mental_clean.csv")
 
 
 
@@ -72,7 +76,131 @@ mental<- mental%>%mutate_at("region", function(x){as.factor(x)})
 
 # Data Analysis -----------------------------------------------------------
 
+mental <- mental %>% mutate(id = row_number()) 
+train <- mental %>% sample_frac(.80)
+test  <- anti_join(mental , train, by = "id")
+
+
 # Classifier #1 : Outcome = mi_treatment
 
+
+
+twoClassSummaryCustom = function (data, lev = NULL, model = NULL) 
+{
+  lvls <- levels(data$obs)
+  if (length(lvls) > 2)
+    stop(paste("Your outcome has", length(lvls), "levels. The twoClassSummary() function isn't appropriate."))
+  if (!all(levels(data[, "pred"]) == lvls)) 
+    stop("levels of observed and predicted data do not match")
+  rocAUC <- ModelMetrics::auc(ifelse(data$obs == lev[2], 0, 
+                                     1), data[, lvls[1]])
+  out <- c(rocAUC,
+           sensitivity(data[, "pred"], data[, "obs"], lev[1]),
+           specificity(data[, "pred"], data[, "obs"], lev[2]),
+           posPredValue(data[, "pred"], data[, "obs"], lev[1]))
+  names(out) <- c("ROC", "Sens", "Spec", "Prec")
+  out
+}
+
+
+trControl <- trainControl(method  = "cv",
+                          number  = 5,
+                          summaryFunction =  twoClassSummaryCustom, #Needed for ROC metric
+                          savePredictions = "all", #Needed for thresholder
+                          classProbs = T #Needed for classification
+) 
+
+
+logistic_mental2 <- caret::train(mi_treatment ~ age + gender + region + self_employed + mi_fhx + employees_number + remote_work + 
+                                  tech_company + employer_mi_wellnessprogram + employer_resources + mi_workinterference + mi_benefits + mi_benefits_awareness,
+                                method     = "glm",
+                                preProcess = c("range"),
+                                metric     = "ROC",
+                                trControl  = trControl,
+                                data = mental)
+
+logistic_mental_no <- caret::train(mi_treatment ~ age + gender + region + self_employed + mi_fhx + employees_number + remote_work + 
+                                   tech_company + employer_mi_wellnessprogram + employer_resources + mi_workinterference + mi_benefits + mi_benefits_awareness,
+                                 method     = "glm",                                 
+                                 metric     = "ROC",
+                                 trControl  = trControl,
+                                 data = mental)
+
+
+tg <- expand.grid(shrinkage = seq(0.1, 1, by = 0.2), 
+                  interaction.depth = c(1, 3, 7, 10),
+                  n.minobsinnode = c(2, 5, 10),
+                  n.trees = c(100, 300, 500, 1000))                        
+
+
+
+modeldt <- caret::train(mi_treatment ~ age + gender + region + self_employed + mi_fhx + employees_number + remote_work + 
+                          tech_company + employer_mi_wellnessprogram + employer_resources + mi_workinterference + mi_benefits + mi_benefits_awareness,
+                                method     = "rpart",
+                                metric     = "ROC",
+                                trControl  = trControl,
+                                data = mental)
+
+rpart.plot::rpart.plot(modeldt$finalModel, type = 4, fallen.leaves = TRUE, extra = 2)
+
+
+gbm_model <- caret::train(mi_treatment ~ age + gender + region + self_employed + mi_fhx + employees_number + remote_work + 
+                            tech_company + employer_mi_wellnessprogram + employer_resources + mi_workinterference + mi_benefits + mi_benefits_awareness,
+                                method     = "gbm",
+                                metric     = "ROC",
+                                trControl  = trControl,
+                                data = mental)
+
+library(randomForest)
+modelrf <- caret::train(mi_treatment ~ age + gender + region + self_employed + mi_fhx + employees_number + remote_work + 
+                           tech_company + employer_mi_wellnessprogram + employer_resources + mi_workinterference + mi_benefits + mi_benefits_awareness,
+                         method     = "rf",
+                         metric     = "ROC",
+                         trControl  = trControl,
+                         data = mental)
+
+
+
+modelSVM <- caret::train(mi_treatment ~ age + gender + region + self_employed + mi_fhx + employees_number + remote_work + 
+                           tech_company + employer_mi_wellnessprogram + employer_resources + mi_workinterference + mi_benefits + mi_benefits_awareness,
+                        method     = "svmRadial",
+                        metric     = "ROC",
+                        trControl  = trControl,
+                        data = mental)
+
+
+
+results2 <- resamples(list("Random Forest"=modelrf, "SVM"=modelSVM, "Logistic Regression"=logistic_mental2, "Decision Tree" = modeldt, "Gradient Boosting" = gbm_model), metric="accuracy")
+
+
+# summarize the distributions
+summary(results2)
+
+dotplot(results2)
+
+plot(varImp(logistic_mental2))
+
+write.csv(as.data.frame(summary(logistic_mental2$finalModel)$coef), file="regression1.csv" )
+
+
 # Classifier #2 : Outcome = discussing_supervisor
+
+
+
+# Bias
+
+p <-ggplot(mental, aes(x=gender, fill=mi_treatment)) +
+  geom_bar(position="stack", alpha=0.5) +
+  theme(legend.position="top", axis.text.x = element_text(angle=90, hjust=1))+
+  labs(title="Variables distribution in the dataset",x="Gender", y = "Count", fill="Mental Illness treatment")
+
+p
+
+# Accuracy
+
+mental_g <- mental%>%filter(region=="Eastern Europe")
+
+predictions <- predict(logistic_mental_no, mental)
+accuracy   <- mean(predictions == mental$mi_treatment, na.rm=F)
+
 
