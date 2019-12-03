@@ -183,10 +183,6 @@ plot(varImp(logistic_mental2))
 write.csv(as.data.frame(summary(logistic_mental2$finalModel)$coef), file="regression1.csv" )
 
 
-# Classifier #2 : Outcome = discussing_supervisor
-
-
-
 # Bias
 
 p <-ggplot(mental, aes(x=gender, fill=mi_treatment)) +
@@ -203,4 +199,60 @@ mental_g <- mental%>%filter(region=="Eastern Europe")
 predictions <- predict(logistic_mental_no, mental)
 accuracy   <- mean(predictions == mental$mi_treatment, na.rm=F)
 
+# Classifier #2 : Outcome = discussing_supervisor
 
+logistic_mental2_2 <- caret::train(mi_treatment ~ age + gender + region 
+                                 + mi_fhx + mi_workinterference + employees_number 
+                                 + remote_work + mi_benefits + mi_benefits_awareness
+                                 + employer_mi_wellnessprogram 
+                                 + employer_resources + anonymity_protection + medical_leave_ease
+                                 + discussing_negative + discussing_interview + discussing_physical
+                                 + employer_seriousness + observed_negative,
+                                 method     = "glm",
+                                 preProcess = c("range"),
+                                 metric     = "ROC",
+                                 trControl  = trControl,
+                                 data = mental)
+
+tg_2 <- expand.grid(shrinkage = seq(0.1, 1, by = 0.2), 
+                  interaction.depth = c(1, 3, 7, 10),
+                  n.minobsinnode = c(2, 5, 10),
+                  n.trees = c(100, 300, 500, 1000)) 
+
+modeldt_2 <- caret::train(mi_treatment ~ age + gender + region 
+                          + mi_fhx + mi_workinterference + employees_number 
+                          + remote_work + mi_benefits + mi_benefits_awareness
+                          + employer_mi_wellnessprogram 
+                          + employer_resources + anonymity_protection + medical_leave_ease
+                          + discussing_negative + discussing_interview + discussing_physical
+                          + employer_seriousness + observed_negative,
+                        method     = "rpart",
+                        metric     = "ROC",
+                        trControl  = trControl,
+                        data = mental)
+
+modelrf_2 <- caret::train(mi_treatment ~ age + gender + region 
+                          + mi_fhx + mi_workinterference + employees_number 
+                          + remote_work + mi_benefits + mi_benefits_awareness
+                          + employer_mi_wellnessprogram 
+                          + employer_resources + anonymity_protection + medical_leave_ease
+                          + discussing_negative + discussing_interview + discussing_physical
+                          + employer_seriousness + observed_negative,
+                        method     = "rf",
+                        metric     = "ROC",
+                        trControl  = trControl,
+                        data = mental)
+
+results2_2 <- resamples(list("Random Forest"=modelrf_2, "Logistic Regression"=logistic_mental2_2, "Decision Tree" = modeldt_2), metric="accuracy")
+
+# summarize the distributions
+summary(results2_2)
+
+dotplot(results2_2)
+
+plot(varImp(logistic_mental2_2))
+
+write.csv(as.data.frame(summary(logistic_mental2$finalModel)$coef), file="regression2.csv" )
+
+# Bias
+# Accuracy
